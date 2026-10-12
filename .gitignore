@@ -1,0 +1,29 @@
+# Credentials and Auth Tokens
+credentials.json
+token.json
+.env
+*.env.*
+
+# Resumes and sensitive personal documents
+*.pdf
+resume/
+resumes/
+
+# Database files
+*.db
+*.sqlite3
+
+# Python cache & virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.pytest_cache/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
