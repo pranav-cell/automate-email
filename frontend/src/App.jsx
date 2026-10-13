@@ -873,12 +873,67 @@ Best regards,
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
             {/* Step A: Test send */}
             <div className="glass-panel" style={{ padding: 24 }}>
-              <h3 style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Sparkles size={20} color="#38bdf8" /> Step A: Send Test to Yourself
-              </h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Sparkles size={20} color="#38bdf8" /> Step A: Send Test to Yourself
+                </h3>
+              </div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 16 }}>
                 Send a test message strictly to your own email address to verify inbox appearance, font rendering, and PDF attachment.
               </p>
+
+              {/* In-Card Mode Switcher */}
+              <div style={{ marginBottom: 16, padding: 12, background: 'rgba(16, 21, 36, 0.7)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                <label style={{ marginBottom: 8, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Sending Mode for Test:
+                </label>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    type="button"
+                    className={`btn ${dryRunMode ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ flex: 1, padding: '8px 12px', fontSize: '0.8rem' }}
+                    onClick={() => setDryRunMode(true)}
+                  >
+                    🧪 Dry-Run Simulation
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${!dryRunMode ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ flex: 1, padding: '8px 12px', fontSize: '0.8rem', background: !dryRunMode ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : undefined }}
+                    onClick={() => setDryRunMode(false)}
+                  >
+                    🚀 Real Email Delivery
+                  </button>
+                </div>
+              </div>
+
+              {/* Mode Explanation Notice */}
+              {dryRunMode ? (
+                <div style={{ marginBottom: 16, padding: 10, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: '#fde68a' }}>
+                  ℹ️ <strong>Dry-Run Mode is Active</strong>: Clicking the button below will only <em>simulate</em> the email in memory. It will <strong>NOT</strong> be delivered to your inbox. Click <strong>"Real Email Delivery"</strong> above to send a real email.
+                </div>
+              ) : (
+                <div style={{ marginBottom: 16, padding: 10, background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: '#6ee7b7' }}>
+                  ✅ <strong>Real Email Delivery is Active</strong>: The email will be sent directly through your Gmail account to your inbox!
+                </div>
+              )}
+
+              {/* Authorization prompt if not yet authorized */}
+              {!systemStatus?.has_token && (
+                <div style={{ marginBottom: 16, padding: 12, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 'var(--radius-md)' }}>
+                  <p style={{ fontSize: '0.82rem', color: '#fca5a5', marginBottom: 10, fontWeight: 600 }}>
+                    ⚠️ Gmail is not authorized yet. You must complete Google OAuth before real emails can be delivered.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ width: '100%', fontSize: '0.82rem', padding: '8px 12px' }}
+                    onClick={handleAuthorizeGmail}
+                  >
+                    <ExternalLink size={14} /> Authorize Gmail Now (1-Click)
+                  </button>
+                </div>
+              )}
 
               <div style={{ marginBottom: 16 }}>
                 <label>Your Verified Email Address</label>
@@ -886,24 +941,27 @@ Best regards,
                   type="email"
                   value={testEmailAddress}
                   onChange={(e) => setTestEmailAddress(e.target.value)}
-                  placeholder="your.email@example.com"
+                  placeholder="your.email@gmail.com"
                 />
               </div>
 
               <button
-                className="btn btn-secondary"
-                style={{ width: '100%' }}
+                className={`btn ${dryRunMode ? 'btn-secondary' : 'btn-primary'}`}
+                style={{ width: '100%', padding: '12px 18px', fontSize: '0.9rem' }}
                 onClick={handleSendTest}
-                disabled={testSending}
+                disabled={testSending || (!dryRunMode && !systemStatus?.has_token)}
               >
                 {testSending ? (
                   <RefreshCw size={16} className="spin-icon" />
                 ) : (
                   <Send size={16} />
                 )}
-                {dryRunMode ? 'Simulate Test Email (Dry-Run)' : 'Send Live Test Email to Me'}
+                {dryRunMode
+                  ? 'Simulate Test Email (Dry-Run Only)'
+                  : `Send Real Test Email to ${testEmailAddress || 'You'}`}
               </button>
             </div>
+
 
             {/* Step B: Batch Send */}
             <div className="glass-panel" style={{ padding: 24 }}>
