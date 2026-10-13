@@ -96,43 +96,64 @@ pytest
 
 ---
 
-## 🖥️ Step 4 — Launch the Dashboard
+## 🖥️ Step 4 — Launch the Application
 
-With your virtual environment activated, run:
+You can launch either the modern **React Web UI** or the classic **Streamlit Dashboard**:
+
+### Option A: Launch the React Web UI (Recommended)
+
+1. Start the backend server:
+   ```bash
+   source .venv/bin/activate
+   python server.py
+   ```
+2. Open your browser to:
+   ```text
+   http://127.0.0.1:8000
+   ```
+   *(The pre-built React application is served directly by the backend!)*
+
+   *If you want to run Vite dev mode with hot reload:*
+   ```bash
+   # In a separate terminal tab:
+   cd frontend
+   npm run dev
+   # Open http://localhost:5173
+   ```
+
+### Option B: Launch the Streamlit Dashboard
 
 ```bash
+source .venv/bin/activate
 streamlit run app.py
 ```
-
-Streamlit will open the dashboard in your default browser at `http://localhost:8501`.
 
 ---
 
 ## 📬 Step 5 — Workflow for Your 61 Recruiters
 
 1. **Authorize Gmail**:
-   - In the sidebar under **1. Gmail Authorization**, click **Authorize Gmail Account**.
-   - A Google sign-in window will open in your browser. Grant the application permission to send emails. (Your credentials token will be saved locally to `token.json`).
+   - In the header / sidebar, click **Authorize Gmail** (a one-time Google sign-in window opens in your browser; local `token.json` is created).
 2. **Import Your 61 Recipient Addresses**:
-   - In Tab 1 (**Dashboard & Recipients**), drag & drop your `recruiters.csv` file.
+   - Under **Recipient Directory**, drag & drop your `recruiters.csv` file.
    - Review any duplicate or invalid email warnings.
-   - Click **Import Valid Recipients into Database**.
+   - Click **Confirm & Import Recipients**.
 3. **Upload Your Resume & Configure Message**:
-   - In Tab 2 (**Template & Resume**), upload your PDF resume. The system validates the PDF file structure.
-   - Customize the **Subject** and **Body** templates. You can use `{name}`, `{first_name}`, `{company}`, `{role}`, and `{applicant_name}`.
+   - Under **Resume & Template**, upload your PDF resume. The system validates the `%PDF-` header and size (< 10MB).
+   - Customize your applicant profile and edit the **Subject** and **Body** templates with dynamic tags like `{first_name}`, `{company}`, `{role}`.
 4. **Live Preview**:
-   - In Tab 3 (**Live Preview**), select different imported recruiters from the dropdown to verify how personalized variables render.
-5. **Dry-Run Test**:
-   - Keep **Dry-Run Mode** toggled ON in the sidebar.
-   - Go to Tab 4 (**Send Controls**) and click **Start Batch Process**. This simulates the full batch and marks items as `DRY_RUN` without touching Gmail.
+   - Under **Live Preview**, pick any recipient from the dropdown to verify how personalized variables look.
+5. **Simulate a Dry Run**:
+   - Ensure **Dry-Run Mode** is active.
+   - Go to **Send & Batch Controls** and click **Start Dry-Run Simulation**. This tests the entire sequence and marks rows as `DRY_RUN` without contacting Google's servers.
 6. **Send a Test Email to Yourself**:
-   - In Tab 4 (**Step A: Send Test Message to Yourself**), turn off dry-run mode or test send directly to your personal email to review the exact formatting and attachment in your real inbox.
+   - Under **Send & Batch Controls** (Step A), enter your personal email and send a test message to verify the real layout and PDF attachment in your inbox.
 7. **Execute Live Batch**:
-   - In the sidebar, turn OFF **Dry-Run Mode**.
-   - Select your desired delay (recommended: 5–10 seconds between emails).
-   - In Tab 4, check the confirmation box: *"I explicitly confirm that I want to send REAL application emails..."*
-   - Click **▶️ Start Batch Process**.
-   - You can click **⏹️ Stop Batch** at any moment to halt the sequence.
+   - Toggle **Dry-Run Mode** OFF.
+   - Check the explicit confirmation checkbox.
+   - Adjust the delay slider (5–10s recommended).
+   - Click **Launch Live Batch**. You can click **Stop Batch** at any moment to cancel.
+
 
 ---
 
