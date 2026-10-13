@@ -1,5 +1,6 @@
 """FastAPI Backend Server for Job Application Email Automator."""
 
+import json
 import os
 import threading
 import time
@@ -20,13 +21,17 @@ from database import (
     STATUS_PENDING,
     STATUS_SENT,
     clear_all_recipients,
+    delete_recipient,
     get_all_recipients,
     get_logs,
     get_recipient_by_id,
+    get_setting,
     get_statistics,
     init_db,
     log_send_event,
     reset_recipient_status,
+    set_setting,
+    update_recipient_details,
     update_recipient_status,
     upsert_recipient,
 )
@@ -61,6 +66,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+LOCAL_RESUME_FILE = "saved_resume.pdf"
+
 # Global in-memory state for batch sender and active resume
 STATE = {
     "resume_bytes": None,
@@ -86,6 +93,46 @@ STATE = {
         "portfolio": "",
     },
 }
+
+
+def load_persistent_state() -> None:
+    """Load settings and saved PDF resume from local storage and SQLite."""
+    # 1. Load Subject Template
+    saved_subj = get_setting("subject_template")
+    if saved_subj:
+        STATE["subject_template"] = saved_subj
+
+    # 2. Load Body Template
+    saved_body = get_setting("body_template")
+    if saved_body:
+        STATE["body_template"] = saved_body
+
+    # 3. Load Applicant Profile
+    saved_app = get_setting("applicant_profile")
+    if saved_app:
+        try:
+            STATE["applicant"] = json.loads(saved_app)
+        except Exception:
+            pass
+
+    # 4. Load Saved Resume PDF
+    saved_name = get_setting("resume_name") or "Resume.pdf"
+    if os.path.exists(LOCAL_RESUME_FILE):
+        try:
+            with open(LOCAL_RESUME_FILE, "rb") as f:
+                content = f.read()
+            is_valid, _, size_b = validate_pdf_attachment(content)
+            if is_valid:
+                STATE["resume_bytes"] = content
+                STATE["resume_name"] = saved_name
+                STATE["resume_size"] = size_b
+        except Exception:
+            pass
+
+
+# Load persistent configuration on module initialization
+load_persistent_state()
+
 
 
 class TemplateUpdateRequest(BaseModel):
@@ -187,11 +234,42 @@ def reset_recipient(recipient_id: int):
     return {"status": "ok", "message": f"Recipient {recipient_id} reset to PENDING"}
 
 
+@app.delete("/api/recipients/{recipient_id}")
+def delete_single_recipient(recipient_id: int):
+    """Delete a single recipient and their logs."""
+    ok = delete_recipient(recipient_id, DEFAULT_DB_PATH)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    return {"status": "ok", "message": f"Recipient {recipient_id} deleted"}
+
+
+@app.put("/api/recipients/{recipient_id}")
+def update_single_recipient(recipient_id: int, req: RecipientImportItem):
+    """Update details of a single recipient."""
+    from csv_parser import is_valid_email
+    if not is_valid_email(req.email):
+        raise HTTPException(status_code=400, detail="Invalid email address format")
+
+    ok = update_recipient_details(
+        recipient_id,
+        email=req.email,
+        name=req.name,
+        company=req.company,
+        role=req.role,
+        notes=req.notes,
+        db_path=DEFAULT_DB_PATH,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    return {"status": "ok", "message": f"Recipient {recipient_id} updated successfully"}
+
+
 @app.delete("/api/recipients/clear")
 def clear_database():
     """Clear all recipients and logs."""
     clear_all_recipients(DEFAULT_DB_PATH)
     return {"status": "ok", "message": "Database cleared"}
+
 
 
 @app.post("/api/upload-csv")
@@ -226,19 +304,30 @@ async def upload_csv(file: UploadFile = File(...)):
 
 @app.post("/api/upload-resume")
 async def upload_resume(file: UploadFile = File(...)):
-    """Upload and validate PDF resume."""
+    """Upload, validate, and persist PDF resume locally."""
     content = await file.read()
     is_valid, err_msg, size_b = validate_pdf_attachment(content)
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Invalid PDF: {err_msg}")
 
+    # 1. Save PDF file locally to disk
+    try:
+        with open(LOCAL_RESUME_FILE, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save PDF locally: {str(e)}")
+
+    filename = file.filename or "Resume.pdf"
     STATE["resume_bytes"] = content
-    STATE["resume_name"] = file.filename or "Resume.pdf"
+    STATE["resume_name"] = filename
     STATE["resume_size"] = size_b
+
+    # 2. Persist filename in SQLite settings
+    set_setting("resume_name", filename)
 
     return {
         "status": "ok",
-        "filename": STATE["resume_name"],
+        "filename": filename,
         "size_bytes": size_b,
         "size_kb": round(size_b / 1024, 1),
     }
@@ -246,11 +335,18 @@ async def upload_resume(file: UploadFile = File(...)):
 
 @app.post("/api/template")
 def update_template(req: TemplateUpdateRequest):
-    """Update active email template and applicant profile."""
+    """Update active email template and applicant profile and persist to SQLite."""
     STATE["subject_template"] = req.subject_template
     STATE["body_template"] = req.body_template
     STATE["applicant"] = req.applicant
+
+    # Persist locally in SQLite
+    set_setting("subject_template", req.subject_template)
+    set_setting("body_template", req.body_template)
+    set_setting("applicant_profile", json.dumps(req.applicant))
+
     return {"status": "ok"}
+
 
 
 @app.get("/api/preview/{recipient_id}")

@@ -68,3 +68,36 @@ def test_api_test_send_dry_run():
     data = response.json()
     assert data["result"]["dry_run"] is True
     assert data["result"]["status"] == "SIMULATED_SUCCESS"
+
+
+def test_api_edit_and_delete_recipient():
+    from database import upsert_recipient, DEFAULT_DB_PATH
+    rec_id, _ = upsert_recipient(DEFAULT_DB_PATH, "edit_target@example.com", name="Original Name", company="Old Co")
+
+    # 1. Update recipient
+    update_payload = {
+        "email": "updated_target@example.com",
+        "name": "Updated Name",
+        "company": "New Co",
+        "role": "Lead Architect",
+        "notes": "Met at conference",
+    }
+    put_resp = client.put(f"/api/recipients/{rec_id}", json=update_payload)
+    assert put_resp.status_code == 200
+
+    # Verify update
+    get_resp = client.get("/api/recipients?search=Updated")
+    assert get_resp.status_code == 200
+    recs = get_resp.json()
+    assert len(recs) == 1
+    assert recs[0]["email"] == "updated_target@example.com"
+    assert recs[0]["company"] == "New Co"
+
+    # 2. Delete recipient
+    del_resp = client.delete(f"/api/recipients/{rec_id}")
+    assert del_resp.status_code == 200
+
+    # Verify deletion
+    verify_resp = client.get(f"/api/recipients?search=updated_target@example.com")
+    assert len(verify_resp.json()) == 0
+

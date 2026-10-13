@@ -73,10 +73,53 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             """
         )
 
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_recipients_status ON recipients(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_recipients_email ON recipients(email)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON send_logs(timestamp)")
         conn.commit()
+
+
+def set_setting(key: str, value: str, db_path: str = DEFAULT_DB_PATH) -> None:
+    """Store or update a persistent setting in the SQLite database."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (key, value, utc_now_iso()),
+        )
+        conn.commit()
+
+
+def get_setting(key: str, default: Optional[str] = None, db_path: str = DEFAULT_DB_PATH) -> Optional[str]:
+    """Retrieve a persistent setting from the SQLite database."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        return row["value"] if row else default
+
+
+def get_all_settings(db_path: str = DEFAULT_DB_PATH) -> Dict[str, str]:
+    """Retrieve all persistent key-value settings."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM app_settings")
+        return {row["key"]: row["value"] for row in cursor.fetchall()}
+
 
 
 def upsert_recipient(
@@ -311,3 +354,44 @@ def clear_all_recipients(db_path: str = DEFAULT_DB_PATH) -> None:
         cursor.execute("DELETE FROM send_logs")
         cursor.execute("DELETE FROM recipients")
         conn.commit()
+
+
+def delete_recipient(recipient_id: int, db_path: str = DEFAULT_DB_PATH) -> bool:
+    """Delete a single recipient and their associated send logs."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM send_logs WHERE recipient_id = ?", (recipient_id,))
+        cursor.execute("DELETE FROM recipients WHERE id = ?", (recipient_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def update_recipient_details(
+    recipient_id: int,
+    email: str,
+    name: str = "",
+    company: str = "",
+    role: str = "",
+    notes: str = "",
+    db_path: str = DEFAULT_DB_PATH,
+) -> bool:
+    """Update profile details of an existing recipient."""
+    clean_email = email.strip().lower()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE recipients
+            SET email = ?,
+                name = ?,
+                company = ?,
+                role = ?,
+                notes = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (clean_email, name.strip(), company.strip(), role.strip(), notes.strip(), utc_now_iso(), recipient_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+

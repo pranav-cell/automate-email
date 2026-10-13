@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Mail, Send, Users, FileText, CheckCircle2, AlertTriangle, XCircle,
   Clock, Shield, RefreshCw, Upload, FileCheck, Trash2, Search,
-  Play, Square, Eye, Sparkles, ExternalLink, Sliders
+  Play, Square, Eye, Sparkles, ExternalLink, Sliders, Edit2, X
 } from 'lucide-react';
 import './App.css';
 
@@ -13,6 +13,8 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [logs, setLogs] = useState([]);
+  const [editingRecipient, setEditingRecipient] = useState(null);
+
 
   // Template and Profile
   const [applicant, setApplicant] = useState({
@@ -80,9 +82,19 @@ Best regards,
           name: data.resume_name,
           size_kb: data.resume_size ? Math.round(data.resume_size / 1024) : 0,
         });
-        if (!testEmailAddress && data.applicant?.email) {
-          setTestEmailAddress(data.applicant.email);
+        if (data.subject_template) {
+          setSubjectTemplate(data.subject_template);
         }
+        if (data.body_template) {
+          setBodyTemplate(data.body_template);
+        }
+        if (data.applicant) {
+          setApplicant(data.applicant);
+          if (!testEmailAddress && data.applicant.email) {
+            setTestEmailAddress(data.applicant.email);
+          }
+        }
+
       }
     } catch (e) {
       console.error('Failed to fetch status:', e);
@@ -273,6 +285,55 @@ Best regards,
       showToast('Reset failed', 'error');
     }
   };
+
+  // Delete Single Recipient
+  const handleDeleteSingleRecipient = async (id, email) => {
+    if (!window.confirm(`Are you sure you want to delete ${email}?`)) return;
+    try {
+      const res = await fetch(`/api/recipients/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast(`Deleted ${email}`, 'info');
+        fetchStatus();
+        fetchRecipients();
+      } else {
+        showToast('Failed to delete recipient', 'error');
+      }
+    } catch (e) {
+      showToast('Delete error: ' + e.message, 'error');
+    }
+  };
+
+  // Save Edited Recipient
+  const handleSaveEditRecipient = async (e) => {
+    if (e) e.preventDefault();
+    if (!editingRecipient) return;
+
+    try {
+      const res = await fetch(`/api/recipients/${editingRecipient.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: editingRecipient.email,
+          name: editingRecipient.name || '',
+          company: editingRecipient.company || '',
+          role: editingRecipient.role || '',
+          notes: editingRecipient.notes || '',
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`Updated ${editingRecipient.email}!`, 'success');
+        setEditingRecipient(null);
+        fetchStatus();
+        fetchRecipients();
+      } else {
+        showToast(data.detail || 'Update failed', 'error');
+      }
+    } catch (err) {
+      showToast('Save error: ' + err.message, 'error');
+    }
+  };
+
 
   // Clear DB
   const handleClearDatabase = async () => {
@@ -656,15 +717,34 @@ Best regards,
                           </span>
                         </td>
                         <td>
-                          {['NEEDS_REVIEW', 'FAILED', 'SENT', 'DRY_RUN'].includes(r.status) && (
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                             <button
                               className="btn btn-secondary"
-                              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-                              onClick={() => handleResetRecipient(r.id)}
+                              style={{ padding: '6px 8px', fontSize: '0.75rem' }}
+                              title="Edit Recipient"
+                              onClick={() => setEditingRecipient({ ...r })}
                             >
-                              <RefreshCw size={12} /> Reset to PENDING
+                              <Edit2 size={13} color="#818cf8" />
                             </button>
-                          )}
+                            <button
+                              className="btn btn-secondary"
+                              style={{ padding: '6px 8px', fontSize: '0.75rem' }}
+                              title="Delete Recipient"
+                              onClick={() => handleDeleteSingleRecipient(r.id, r.email)}
+                            >
+                              <Trash2 size={13} color="#f87171" />
+                            </button>
+                            {['NEEDS_REVIEW', 'FAILED', 'SENT', 'DRY_RUN'].includes(r.status) && (
+                              <button
+                                className="btn btn-secondary"
+                                style={{ padding: '6px 8px', fontSize: '0.75rem' }}
+                                title="Reset to PENDING"
+                                onClick={() => handleResetRecipient(r.id)}
+                              >
+                                <RefreshCw size={13} />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -672,9 +752,103 @@ Best regards,
                 </tbody>
               </table>
             </div>
+
+            {/* Edit Recipient Modal Dialog */}
+            {editingRecipient && (
+              <div style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'rgba(0, 0, 0, 0.75)',
+                backdropFilter: 'blur(8px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 99999,
+                padding: 20,
+              }}>
+                <div className="glass-panel" style={{ width: '100%', maxWidth: 480, padding: 26, background: '#131929', border: '1px solid var(--border-focus)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Edit2 size={18} color="#818cf8" /> Edit Recipient #{editingRecipient.id}
+                    </h3>
+                    <button
+                      onClick={() => setEditingRecipient(null)}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSaveEditRecipient} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div>
+                      <label>Email Address *</label>
+                      <input
+                        type="email"
+                        required
+                        value={editingRecipient.email}
+                        onChange={(e) => setEditingRecipient({ ...editingRecipient, email: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label>Full Name</label>
+                      <input
+                        type="text"
+                        value={editingRecipient.name || ''}
+                        onChange={(e) => setEditingRecipient({ ...editingRecipient, name: e.target.value })}
+                        placeholder="e.g. John Doe"
+                      />
+                    </div>
+                    <div>
+                      <label>Company</label>
+                      <input
+                        type="text"
+                        value={editingRecipient.company || ''}
+                        onChange={(e) => setEditingRecipient({ ...editingRecipient, company: e.target.value })}
+                        placeholder="e.g. Acme Corp"
+                      />
+                    </div>
+                    <div>
+                      <label>Role / Position</label>
+                      <input
+                        type="text"
+                        value={editingRecipient.role || ''}
+                        onChange={(e) => setEditingRecipient({ ...editingRecipient, role: e.target.value })}
+                        placeholder="e.g. Hiring Lead"
+                      />
+                    </div>
+                    <div>
+                      <label>Notes / Context</label>
+                      <input
+                        type="text"
+                        value={editingRecipient.notes || ''}
+                        onChange={(e) => setEditingRecipient({ ...editingRecipient, notes: e.target.value })}
+                        placeholder="e.g. Found on LinkedIn"
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
+                      <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+                        <CheckCircle2 size={16} /> Save Changes
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setEditingRecipient(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
+
 
       {/* TAB 2: TEMPLATE & RESUME */}
       {activeTab === 'template' && (
