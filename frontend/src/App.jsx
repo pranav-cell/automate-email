@@ -8,7 +8,7 @@ import {
 import './App.css';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('recipients');
+  const [activeTab, setActiveTab] = useState(() => window.location.hash.slice(1) || 'recipients');
   const [systemStatus, setSystemStatus] = useState(null);
   const [recipients, setRecipients] = useState([]);
   const [statusFilter, setStatusFilter] = useState('All');
@@ -23,6 +23,25 @@ export default function App() {
   const [sharingData, setSharingData] = useState(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [logs, setLogs] = useState([]);
+
+  const pages = [
+    { id: 'recipients', label: 'Recipients', detail: 'Manage your outreach list', icon: Users },
+    { id: 'template', label: 'Email setup', detail: 'Resume & message template', icon: FileText },
+    { id: 'preview', label: 'Preview', detail: 'Review a personalized email', icon: Eye },
+    { id: 'send', label: 'Send campaign', detail: 'Test or launch outreach', icon: Send },
+    { id: 'logs', label: 'Activity', detail: 'Delivery history and errors', icon: Clock },
+  ];
+  const navigate = (page) => {
+    setActiveTab(page);
+    window.location.hash = page;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    const syncPage = () => setActiveTab(pages.some(page => page.id === window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'recipients');
+    window.addEventListener('hashchange', syncPage);
+    return () => window.removeEventListener('hashchange', syncPage);
+  }, []);
 
 
 
@@ -755,27 +774,46 @@ Best regards,
       )}
 
       {/* Header */}
-      <header className="glass-panel app-header">
+      <aside className="app-sidebar">
+        <a className="sidebar-brand" href="#recipients" onClick={() => navigate('recipients')}>
+          <span className="brand-icon-wrap"><Mail size={21} /></span>
+          <span><strong>Reachout</strong><small>CAREER OUTREACH</small></span>
+        </a>
+        <div className="sidebar-label">WORKSPACE</div>
+        <nav className="side-nav" aria-label="Main navigation">
+          {pages.map(({ id, label, detail, icon: Icon }) => (
+            <button key={id} className={`side-link ${activeTab === id ? 'active' : ''}`} onClick={() => navigate(id)}>
+              <Icon size={18} /><span>{label}<small>{detail}</small></span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="sidebar-status"><span className={`status-dot ${systemStatus?.has_token ? 'online' : ''}`} />{systemStatus?.has_token ? 'Gmail connected' : 'Gmail not connected'}</div>
+          <span>Personal outreach workspace</span>
+        </div>
+      </aside>
+      <main className="main-content">
+      <header className="app-header">
         <div className="brand-section">
           <div className="brand-icon-wrap">
             <Mail size={26} />
           </div>
           <div>
-            <h1 className="brand-title">Job Application Automator</h1>
-            <p className="brand-subtitle">Automate personalized outreach with official Gmail OAuth 2.0</p>
+            <h1 className="brand-title">{pages.find(page => page.id === activeTab)?.label || 'Recipients'}</h1>
+            <p className="brand-subtitle">{pages.find(page => page.id === activeTab)?.detail || 'Manage your outreach list'}</p>
           </div>
         </div>
 
         <div className="header-actions">
           {/* Mode switch */}
-          <div
+          <button
             className={`mode-toggle ${dryRunMode ? 'active' : ''}`}
             onClick={() => setDryRunMode(!dryRunMode)}
             title="Toggle between dry-run simulation and real email delivery"
           >
             <Shield size={16} />
             <span>{dryRunMode ? 'Dry-Run Mode (Safe)' : 'Live Send Mode'}</span>
-          </div>
+          </button>
 
           {/* Auth status indicator */}
           {systemStatus?.has_token ? (
@@ -795,6 +833,7 @@ Best regards,
       </header>
 
       {/* KPI Stats Bar */}
+      {activeTab === 'recipients' && <>
       <div className="stats-grid">
         <div className="glass-panel stat-card">
           <div className="stat-icon" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
@@ -846,48 +885,15 @@ Best regards,
           </div>
         </div>
       </div>
+      </>}
 
       {/* Notice Banner */}
-      <div className="notice-banner">
+      {activeTab === 'send' && <div className="notice-banner">
         <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: 2 }} />
         <div>
           <strong>Deliverability & Safety Notice:</strong> Cold email delivery cannot guarantee 100% inbox placement, and this tool cannot verify if an email address belongs to an active recruiter. Use a conservative delay (5–10s) between messages to protect your Gmail reputation.
         </div>
-      </div>
-
-      {/* Tabs Navigation */}
-      <nav className="tabs-nav">
-        <button
-          className={`tab-btn ${activeTab === 'recipients' ? 'active' : ''}`}
-          onClick={() => setActiveTab('recipients')}
-        >
-          <Users size={18} /> Recipient Directory
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'template' ? 'active' : ''}`}
-          onClick={() => setActiveTab('template')}
-        >
-          <FileText size={18} /> Resume & Template
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'preview' ? 'active' : ''}`}
-          onClick={() => setActiveTab('preview')}
-        >
-          <Eye size={18} /> Live Preview
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'send' ? 'active' : ''}`}
-          onClick={() => setActiveTab('send')}
-        >
-          <Send size={18} /> Send & Batch Controls
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'logs' ? 'active' : ''}`}
-          onClick={() => setActiveTab('logs')}
-        >
-          <Clock size={18} /> Activity Logs
-        </button>
-      </nav>
+      </div>}
 
       {/* TAB 1: RECIPIENTS */}
       {activeTab === 'recipients' && (
@@ -1921,6 +1927,7 @@ Best regards,
           </div>
         </div>
       )}
+      </main>
     </div>
   );
 }

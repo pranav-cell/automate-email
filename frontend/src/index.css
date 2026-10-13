@@ -1,5 +1,5 @@
 :root {
-  --bg-primary: #0a0d14;
+  --bg-primary: #f5f7fb;
   --bg-secondary: #101524;
   --bg-tertiary: #171f33;
   --bg-card: rgba(19, 25, 41, 0.75);
@@ -21,9 +21,9 @@
   --info: #38bdf8;
   --info-bg: rgba(56, 189, 248, 0.12);
 
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --text-dim: #64748b;
+  --text-main: #182230;
+  --text-muted: #687386;
+  --text-dim: #8b95a5;
 
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
@@ -50,10 +50,7 @@ body {
   min-height: 100vh;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  background-image: 
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(168, 85, 247, 0.1) 0px, transparent 50%),
-    radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
+  background-image: radial-gradient(at 0% 0%, rgba(90, 102, 242, 0.035) 0px, transparent 45%);
   background-attachment: fixed;
 }
 
