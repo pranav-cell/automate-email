@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Mail, Send, Users, FileText, CheckCircle2, AlertTriangle, XCircle,
   Clock, Shield, RefreshCw, Upload, FileCheck, Trash2, Search,
-  Play, Square, Eye, Sparkles, ExternalLink, Sliders, Edit2, X
+  Play, Square, Eye, Sparkles, ExternalLink, Sliders, Edit2, X,
+  Share2, Copy, Check
 } from 'lucide-react';
 import './App.css';
 
@@ -12,8 +13,17 @@ export default function App() {
   const [recipients, setRecipients] = useState([]);
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [logs, setLogs] = useState([]);
   const [editingRecipient, setEditingRecipient] = useState(null);
+  const [singleTargetId, setSingleTargetId] = useState(null);
+  const [targetEmail, setTargetEmail] = useState('');
+  const [targetName, setTargetName] = useState('');
+  const [targetCompany, setTargetCompany] = useState('');
+  const [targetRole, setTargetRole] = useState('');
+  const [sharingRecipient, setSharingRecipient] = useState(null);
+  const [sharingData, setSharingData] = useState(null);
+  const [copyFeedback, setCopyFeedback] = useState(false);
+  const [logs, setLogs] = useState([]);
+
 
 
   // Template and Profile
@@ -112,6 +122,13 @@ Best regards,
         setRecipients(data);
         if (data.length > 0 && !previewRecipientId) {
           setPreviewRecipientId(data[0].id);
+        }
+        if (data.length > 0 && !targetEmail) {
+          setSingleTargetId(data[0].id);
+          setTargetEmail(data[0].email);
+          setTargetName(data[0].name || '');
+          setTargetCompany(data[0].company || '');
+          setTargetRole(data[0].role || '');
         }
       }
     } catch (e) {
@@ -349,8 +366,276 @@ Best regards,
     }
   };
 
+  const [singleSendingId, setSingleSendingId] = useState(null);
+
+  // Send Single Email to Specific Recipient
+  const handleSendSingle = async (recipientId, recipientEmail) => {
+    if (!dryRunMode && !systemStatus?.has_token) {
+      showToast('⚠️ Please authorize Gmail first before sending live emails.', 'error');
+      return;
+    }
+    const modePrompt = dryRunMode
+      ? `Simulate email to ${recipientEmail} (Dry-Run mode)?`
+      : `Send REAL application email to ${recipientEmail}?`;
+
+    if (!window.confirm(modePrompt)) return;
+
+    setSingleSendingId(recipientId);
+    try {
+      const res = await fetch(`/api/send/single/${recipientId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dry_run: dryRunMode,
+          subject_template: subjectTemplate,
+          body_template: bodyTemplate,
+          applicant,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.result.dry_run) {
+          showToast(`🧪 Simulated test message for ${recipientEmail}`, 'info');
+        } else {
+          showToast(`🎉 Email delivered to ${recipientEmail}!`, 'success');
+        }
+        fetchStatus();
+        fetchRecipients();
+        fetchLogs();
+      } else {
+        showToast(data.detail || 'Send failed', 'error');
+      }
+    } catch (err) {
+      showToast('Send error: ' + err.message, 'error');
+    } finally {
+      setSingleSendingId(null);
+    }
+  };
+
+  // Open Sharing Modal and prefetch rendered preview
+  const openShareModal = async (recipient) => {
+    setSharingRecipient(recipient);
+    setSharingData(null);
+    try {
+      const res = await fetch(`/api/preview/${recipient.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSharingData(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch preview for sharing:', e);
+    }
+  };
+
+  // Open in Gmail Web Compose
+  const handleOpenGmailWeb = async (rec) => {
+    if (!rec) return;
+    try {
+      const res = await fetch(`/api/preview/${rec.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        const to = encodeURIComponent(rec.email);
+        const su = encodeURIComponent(data.rendered.subject);
+        const body = encodeURIComponent(data.rendered.body);
+        window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${su}&body=${body}`, '_blank');
+        showToast(`Opened Gmail Web compose for ${rec.email}`, 'info');
+      }
+    } catch (err) {
+      showToast('Error preparing Gmail draft: ' + err.message, 'error');
+    }
+  };
+
+  // Open in Default Mail App (mailto:)
+  const handleOpenMailto = async (rec) => {
+    if (!rec) return;
+    try {
+      const res = await fetch(`/api/preview/${rec.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        const to = encodeURIComponent(rec.email);
+        const su = encodeURIComponent(data.rendered.subject);
+        const body = encodeURIComponent(data.rendered.body);
+        window.location.href = `mailto:${to}?subject=${su}&body=${body}`;
+        showToast(`Opening default mail app for ${rec.email}`, 'info');
+      }
+    } catch (err) {
+      showToast('Error opening mail client: ' + err.message, 'error');
+    }
+  };
+
+  // Copy Single Recipient Content to Clipboard
+  const handleCopySingleContent = async (rec) => {
+    if (!rec) return;
+    try {
+      const res = await fetch(`/api/preview/${rec.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        const text = `To: ${rec.email}\nSubject: ${data.rendered.subject}\n\n${data.rendered.body}`;
+        await navigator.clipboard.writeText(text);
+        setCopyFeedback(true);
+        setTimeout(() => setCopyFeedback(false), 2500);
+        showToast(`📋 Copied personalized email draft to clipboard!`, 'success');
+      }
+    } catch (err) {
+      showToast('Error copying draft: ' + err.message, 'error');
+    }
+  };
+
+  // Send or simulate outreach to the specified targetEmail (saved or custom)
+  const handleSendTargetOutreach = async () => {
+    const trimmedEmail = (targetEmail || '').trim();
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      showToast('Please enter a valid recipient email address', 'warning');
+      return;
+    }
+
+    const modePrompt = dryRunMode
+      ? `Simulate outreach to ${trimmedEmail} (Dry-Run mode)?`
+      : `Send REAL application email to ${trimmedEmail}?`;
+
+    if (!window.confirm(modePrompt)) return;
+
+    setSingleSendingId('target');
+    try {
+      const res = await fetch('/api/send/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          name: targetName,
+          company: targetCompany,
+          role: targetRole,
+          dry_run: dryRunMode,
+          subject_template: subjectTemplate,
+          body_template: bodyTemplate,
+          applicant,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.result.dry_run) {
+          showToast(`🧪 Simulated test message for ${trimmedEmail}`, 'info');
+        } else {
+          showToast(`🎉 Email delivered to ${trimmedEmail}!`, 'success');
+        }
+        fetchStatus();
+        fetchRecipients();
+        fetchLogs();
+      } else {
+        showToast(data.detail || 'Send failed', 'error');
+      }
+    } catch (err) {
+      showToast('Send error: ' + err.message, 'error');
+    } finally {
+      setSingleSendingId(null);
+    }
+  };
+
+  // Open Gmail Web Compose for target recipient
+  const handleOpenGmailWebTarget = async () => {
+    const trimmedEmail = (targetEmail || '').trim();
+    if (!trimmedEmail) {
+      showToast('Please enter a recipient email address', 'warning');
+      return;
+    }
+    try {
+      const res = await fetch('/api/preview/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          name: targetName,
+          company: targetCompany,
+          role: targetRole,
+          subject_template: subjectTemplate,
+          body_template: bodyTemplate,
+          applicant,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const to = encodeURIComponent(trimmedEmail);
+        const su = encodeURIComponent(data.rendered.subject);
+        const body = encodeURIComponent(data.rendered.body);
+        window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${su}&body=${body}`, '_blank');
+        showToast(`Opened Gmail Web compose for ${trimmedEmail}`, 'info');
+      }
+    } catch (err) {
+      showToast('Error preparing Gmail draft: ' + err.message, 'error');
+    }
+  };
+
+  // Open Default Mail App (mailto:) for target recipient
+  const handleOpenMailtoTarget = async () => {
+    const trimmedEmail = (targetEmail || '').trim();
+    if (!trimmedEmail) {
+      showToast('Please enter a recipient email address', 'warning');
+      return;
+    }
+    try {
+      const res = await fetch('/api/preview/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          name: targetName,
+          company: targetCompany,
+          role: targetRole,
+          subject_template: subjectTemplate,
+          body_template: bodyTemplate,
+          applicant,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const to = encodeURIComponent(trimmedEmail);
+        const su = encodeURIComponent(data.rendered.subject);
+        const body = encodeURIComponent(data.rendered.body);
+        window.location.href = `mailto:${to}?subject=${su}&body=${body}`;
+        showToast(`Opening default mail app for ${trimmedEmail}`, 'info');
+      }
+    } catch (err) {
+      showToast('Error opening mail client: ' + err.message, 'error');
+    }
+  };
+
+  // Copy target draft to clipboard
+  const handleCopyTargetDraft = async () => {
+    const trimmedEmail = (targetEmail || '').trim();
+    if (!trimmedEmail) {
+      showToast('Please enter a recipient email address', 'warning');
+      return;
+    }
+    try {
+      const res = await fetch('/api/preview/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          name: targetName,
+          company: targetCompany,
+          role: targetRole,
+          subject_template: subjectTemplate,
+          body_template: bodyTemplate,
+          applicant,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = `To: ${trimmedEmail}\nSubject: ${data.rendered.subject}\n\n${data.rendered.body}`;
+        await navigator.clipboard.writeText(text);
+        setCopyFeedback(true);
+        setTimeout(() => setCopyFeedback(false), 2500);
+        showToast(`📋 Copied personalized email draft to clipboard!`, 'success');
+      }
+    } catch (err) {
+      showToast('Error copying draft: ' + err.message, 'error');
+    }
+  };
+
   // Test Email
   const handleSendTest = async () => {
+
     if (!testEmailAddress) {
       showToast('Please enter your test email address', 'warning');
       return;
@@ -720,6 +1005,27 @@ Best regards,
                           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                             <button
                               className="btn btn-secondary"
+                              style={{ padding: '6px 8px', fontSize: '0.75rem', background: 'rgba(16, 185, 129, 0.15)', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+                              title={`Send email now to ${r.email}`}
+                              disabled={singleSendingId === r.id}
+                              onClick={() => handleSendSingle(r.id, r.email)}
+                            >
+                              {singleSendingId === r.id ? (
+                                <RefreshCw size={13} className="spin-icon" color="#34d399" />
+                              ) : (
+                                <Send size={13} color="#34d399" />
+                              )}
+                            </button>
+                            <button
+                              className="btn btn-secondary"
+                              style={{ padding: '6px 8px', fontSize: '0.75rem', background: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.3)' }}
+                              title={`Share or open options for ${r.email}`}
+                              onClick={() => openShareModal(r)}
+                            >
+                              <Share2 size={13} color="#38bdf8" />
+                            </button>
+                            <button
+                              className="btn btn-secondary"
                               style={{ padding: '6px 8px', fontSize: '0.75rem' }}
                               title="Edit Recipient"
                               onClick={() => setEditingRecipient({ ...r })}
@@ -745,6 +1051,7 @@ Best regards,
                               </button>
                             )}
                           </div>
+
                         </td>
                       </tr>
                     ))
@@ -842,6 +1149,123 @@ Best regards,
                       </button>
                     </div>
                   </form>
+                </div>
+              </div>
+            )}
+
+            {/* Share / Send Recipient Modal Dialog */}
+            {sharingRecipient && (
+              <div style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'rgba(0, 0, 0, 0.78)',
+                backdropFilter: 'blur(8px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 99999,
+                padding: 20,
+              }}>
+                <div className="glass-panel" style={{ width: '100%', maxWidth: 540, padding: 26, background: '#131929', border: '1px solid var(--border-focus)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '1.1rem' }}>
+                      <Share2 size={20} color="#38bdf8" /> Share / Send Single Email
+                    </h3>
+                    <button
+                      onClick={() => { setSharingRecipient(null); setSharingData(null); }}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <div style={{ marginBottom: 16, padding: 12, background: 'rgba(16, 21, 36, 0.8)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                      <div>
+                        <strong style={{ fontSize: '0.95rem', color: '#ffffff' }}>{sharingRecipient.name || 'Unnamed Recruiter'}</strong>
+                        <div style={{ fontSize: '0.82rem', color: '#a5b4fc' }}>{sharingRecipient.email}</div>
+                      </div>
+                      <span className={`badge badge-${sharingRecipient.status.toLowerCase().replace('_', '-')}`}>
+                        {sharingRecipient.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                      {sharingRecipient.company ? `Company: ${sharingRecipient.company}` : ''}
+                      {sharingRecipient.role ? ` • Role: ${sharingRecipient.role}` : ''}
+                    </div>
+                  </div>
+
+                  {sharingData ? (
+                    <div style={{ marginBottom: 18, maxHeight: 180, overflowY: 'auto', background: 'rgba(0,0,0,0.3)', padding: 12, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                        <strong>Subject:</strong> {sharingData.rendered.subject}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', whiteSpace: 'pre-wrap' }}>
+                        {sharingData.rendered.body}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                      <RefreshCw size={16} className="spin-icon" style={{ marginBottom: 6 }} />
+                      <div>Preparing personalized email draft...</div>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {/* Method 1: Send via Gmail API */}
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: '100%', padding: '10px 14px', background: !dryRunMode ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : undefined }}
+                      disabled={singleSendingId === sharingRecipient.id || (!dryRunMode && !systemStatus?.has_token)}
+                      onClick={async () => {
+                        const rid = sharingRecipient.id;
+                        const remail = sharingRecipient.email;
+                        setSharingRecipient(null);
+                        setSharingData(null);
+                        await handleSendSingle(rid, remail);
+                      }}
+                    >
+                      {singleSendingId === sharingRecipient.id ? (
+                        <RefreshCw size={15} className="spin-icon" />
+                      ) : (
+                        <Send size={15} />
+                      )}
+                      {dryRunMode ? 'Simulate Send (Dry-Run Mode)' : 'Send Real Email via Gmail API'}
+                    </button>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      {/* Method 2: Open in Gmail Web */}
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.8rem', padding: '8px 10px', justifyContent: 'center' }}
+                        onClick={() => handleOpenGmailWeb(sharingRecipient)}
+                      >
+                        <ExternalLink size={14} color="#38bdf8" /> Open in Gmail Web
+                      </button>
+
+                      {/* Method 3: Open in Mail Client */}
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.8rem', padding: '8px 10px', justifyContent: 'center' }}
+                        onClick={() => handleOpenMailto(sharingRecipient)}
+                      >
+                        <Mail size={14} color="#a855f7" /> Open in Mail App
+                      </button>
+                    </div>
+
+                    {/* Method 4: Copy Email Content */}
+                    <button
+                      className="btn btn-secondary"
+                      style={{ width: '100%', fontSize: '0.8rem', padding: '8px 10px', justifyContent: 'center' }}
+                      onClick={() => handleCopySingleContent(sharingRecipient)}
+                    >
+                      {copyFeedback ? <Check size={14} color="#34d399" /> : <Copy size={14} />}
+                      {copyFeedback ? 'Copied to Clipboard!' : 'Copy Subject & Body to Clipboard'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -992,19 +1416,59 @@ Best regards,
                 </p>
               </div>
 
-              <div style={{ width: 320 }}>
-                <select
-                  value={previewRecipientId || ''}
-                  onChange={(e) => setPreviewRecipientId(Number(e.target.value))}
-                >
-                  {recipients.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name || 'No Name'} • {r.email} ({r.company || 'No Company'})
-                    </option>
-                  ))}
-                </select>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ width: 300 }}>
+                  <select
+                    value={previewRecipientId || ''}
+                    onChange={(e) => setPreviewRecipientId(Number(e.target.value))}
+                  >
+                    {recipients.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name || 'No Name'} • {r.email} ({r.company || 'No Company'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {previewData && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button
+                      className="btn btn-primary"
+                      style={{ background: !dryRunMode ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : undefined, whiteSpace: 'nowrap' }}
+                      disabled={singleSendingId === previewData.recipient.id || (!dryRunMode && !systemStatus?.has_token)}
+                      onClick={() => handleSendSingle(previewData.recipient.id, previewData.recipient.email)}
+                    >
+                      {singleSendingId === previewData.recipient.id ? (
+                        <RefreshCw size={14} className="spin-icon" />
+                      ) : (
+                        <Send size={14} />
+                      )}
+                      {dryRunMode ? 'Simulate Send (Dry-Run)' : 'Send Email to this Recipient'}
+                    </button>
+
+                    <button
+                      className="btn btn-secondary"
+                      style={{ whiteSpace: 'nowrap' }}
+                      title="Share / Open in Gmail Web or Mail App"
+                      onClick={() => openShareModal(previewData.recipient)}
+                    >
+                      <Share2 size={14} color="#38bdf8" /> Share Options
+                    </button>
+
+                    <button
+                      className="btn btn-secondary"
+                      style={{ whiteSpace: 'nowrap' }}
+                      title="Copy rendered email text to clipboard"
+                      onClick={() => handleCopySingleContent(previewData.recipient)}
+                    >
+                      {copyFeedback ? <Check size={14} color="#34d399" /> : <Copy size={14} />}
+                      {copyFeedback ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
+
 
             {previewData ? (
               <div className="email-mockup">
@@ -1215,6 +1679,185 @@ Best regards,
                 </div>
               )}
             </div>
+
+            {/* Step C: Send / Share with Single Recipient */}
+            <div className="glass-panel" style={{ padding: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Share2 size={20} color="#38bdf8" /> Step C: Send / Share Single Recipient
+                </h3>
+              </div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+                Target any recruiter individually without launching the entire batch. Select from directory or type any email address directly.
+              </p>
+
+              {/* 1. Quick Select Dropdown */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label style={{ margin: 0, fontSize: '0.8rem' }}>Select from Saved Directory</label>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{recipients.length} saved</span>
+                </div>
+                <select
+                  value={singleTargetId || ''}
+                  onChange={(e) => {
+                    const selId = e.target.value ? Number(e.target.value) : null;
+                    setSingleTargetId(selId);
+                    if (selId) {
+                      const found = recipients.find((r) => r.id === selId);
+                      if (found) {
+                        setTargetEmail(found.email);
+                        setTargetName(found.name || '');
+                        setTargetCompany(found.company || '');
+                        setTargetRole(found.role || '');
+                      }
+                    }
+                  }}
+                >
+                  <option value="">-- Choose saved recruiter or type custom email below --</option>
+                  {recipients.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name ? `${r.name} • ` : ''}{r.email} ({r.company || 'No Company'}) [{r.status}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 2. Direct Email Input */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label style={{ margin: 0, fontSize: '0.8rem' }}>Recipient Email Address *</label>
+                  {targetEmail && (
+                    <button
+                      type="button"
+                      style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}
+                      onClick={() => {
+                        setSingleTargetId(null);
+                        setTargetEmail('');
+                        setTargetName('');
+                        setTargetCompany('');
+                        setTargetRole('');
+                      }}
+                    >
+                      + Clear / Type New Email
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="email"
+                  required
+                  value={targetEmail}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setTargetEmail(val);
+                    const matched = recipients.find((r) => r.email.toLowerCase() === val.toLowerCase().trim());
+                    if (matched) {
+                      setSingleTargetId(matched.id);
+                      if (!targetName && matched.name) setTargetName(matched.name);
+                      if (!targetCompany && matched.company) setTargetCompany(matched.company);
+                    } else if (singleTargetId) {
+                      setSingleTargetId(null);
+                    }
+                  }}
+                  placeholder="e.g. recruiter@company.com"
+                />
+              </div>
+
+              {/* 3. Optional Recipient Name & Company Inputs */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+                <div>
+                  <label style={{ fontSize: '0.78rem', marginBottom: 4 }}>Full Name (Optional)</label>
+                  <input
+                    type="text"
+                    value={targetName}
+                    onChange={(e) => setTargetName(e.target.value)}
+                    placeholder="e.g. Alex Rivera"
+                    style={{ fontSize: '0.82rem', padding: '8px 10px' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.78rem', marginBottom: 4 }}>Company (Optional)</label>
+                  <input
+                    type="text"
+                    value={targetCompany}
+                    onChange={(e) => setTargetCompany(e.target.value)}
+                    placeholder="e.g. Acme Corp"
+                    style={{ fontSize: '0.82rem', padding: '8px 10px' }}
+                  />
+                </div>
+              </div>
+
+              {/* 4. Active Target Status Strip */}
+              {targetEmail && (
+                <div style={{ marginBottom: 18, padding: 12, background: 'rgba(16, 21, 36, 0.7)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <strong style={{ fontSize: '0.88rem', color: '#ffffff' }}>
+                      {targetName || targetEmail}
+                    </strong>
+                    {(() => {
+                      const matched = recipients.find((r) => (singleTargetId && r.id === singleTargetId) || r.email.toLowerCase() === targetEmail.toLowerCase().trim());
+                      if (matched) {
+                        return <span className={`badge badge-${matched.status.toLowerCase().replace('_', '-')}`}>{matched.status}</span>;
+                      }
+                      return <span className="badge badge-pending">Custom Recipient</span>;
+                    })()}
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#a5b4fc' }}>{targetEmail}</div>
+                  {(targetCompany || targetRole) && (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      {targetCompany || ''} {targetRole ? `• ${targetRole}` : ''}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 5. Action Buttons */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', padding: '11px 16px', background: !dryRunMode ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : undefined }}
+                  disabled={singleSendingId === 'target' || !targetEmail || (!dryRunMode && !systemStatus?.has_token)}
+                  onClick={handleSendTargetOutreach}
+                >
+                  {singleSendingId === 'target' ? (
+                    <RefreshCw size={16} className="spin-icon" />
+                  ) : (
+                    <Send size={16} />
+                  )}
+                  {dryRunMode
+                    ? `Simulate Send to ${targetName || targetEmail || 'Recipient'} (Dry-Run)`
+                    : `Send Real Email to ${targetName || targetEmail || 'Recipient'}`}
+                </button>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem', padding: '8px 10px', justifyContent: 'center' }}
+                    onClick={handleOpenGmailWebTarget}
+                    disabled={!targetEmail}
+                  >
+                    <ExternalLink size={14} color="#38bdf8" /> Gmail Web
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem', padding: '8px 10px', justifyContent: 'center' }}
+                    onClick={handleOpenMailtoTarget}
+                    disabled={!targetEmail}
+                  >
+                    <Mail size={14} color="#a855f7" /> Mail App
+                  </button>
+                </div>
+
+                <button
+                  className="btn btn-secondary"
+                  style={{ width: '100%', fontSize: '0.8rem', padding: '8px 10px', justifyContent: 'center' }}
+                  onClick={handleCopyTargetDraft}
+                  disabled={!targetEmail}
+                >
+                  {copyFeedback ? <Check size={14} color="#34d399" /> : <Copy size={14} />}
+                  {copyFeedback ? 'Copied to Clipboard!' : 'Copy Personalized Draft'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1242,32 +1885,35 @@ Best regards,
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.length === 0 ? (
+                  {!Array.isArray(logs) || logs.length === 0 ? (
                     <tr>
                       <td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
                         No send events recorded yet.
                       </td>
                     </tr>
                   ) : (
-                    logs.map((log) => (
-                      <tr key={log.id}>
-                        <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '—'}
-                        </td>
-                        <td style={{ fontWeight: 600 }}>{log.email}</td>
-                        <td>
-                          <span className={`badge badge-${log.status.toLowerCase().replace('_', '-')}`}>
-                            {log.status}
-                          </span>
-                        </td>
-                        <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {log.subject || '—'}
-                        </td>
-                        <td style={{ fontSize: '0.8rem', color: log.error_message ? '#f87171' : 'var(--text-muted)' }}>
-                          {log.error_message || 'Completed cleanly'}
-                        </td>
-                      </tr>
-                    ))
+                    logs.map((log, idx) => {
+                      const statusClean = (log.status || 'INFO').toLowerCase().replace('_', '-');
+                      return (
+                        <tr key={log.id ?? idx}>
+                          <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '—'}
+                          </td>
+                          <td style={{ fontWeight: 600 }}>{log.email || '—'}</td>
+                          <td>
+                            <span className={`badge badge-${statusClean}`}>
+                              {log.status || 'INFO'}
+                            </span>
+                          </td>
+                          <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {log.subject || '—'}
+                          </td>
+                          <td style={{ fontSize: '0.8rem', color: log.error_message ? '#f87171' : 'var(--text-muted)' }}>
+                            {log.error_message || 'Completed cleanly'}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

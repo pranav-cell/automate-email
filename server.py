@@ -11,7 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from csv_parser import parse_csv_content
+from csv_parser import (
+    infer_company_from_email,
+    is_valid_email,
+    normalize_email,
+    parse_csv_content,
+)
 
 from database import (
     DEFAULT_DB_PATH,
@@ -147,6 +152,36 @@ class TestSendRequest(BaseModel):
     subject_template: Optional[str] = None
     body_template: Optional[str] = None
     applicant: Optional[Dict[str, str]] = None
+
+
+class SingleSendRequest(BaseModel):
+    dry_run: bool = False
+    subject_template: Optional[str] = None
+    body_template: Optional[str] = None
+    applicant: Optional[Dict[str, str]] = None
+
+
+class CustomSendRequest(BaseModel):
+    email: str
+    name: Optional[str] = ""
+    company: Optional[str] = ""
+    role: Optional[str] = ""
+    notes: Optional[str] = ""
+    dry_run: bool = False
+    subject_template: Optional[str] = None
+    body_template: Optional[str] = None
+    applicant: Optional[Dict[str, str]] = None
+
+
+class CustomPreviewRequest(BaseModel):
+    email: str
+    name: Optional[str] = ""
+    company: Optional[str] = ""
+    role: Optional[str] = ""
+    subject_template: Optional[str] = None
+    body_template: Optional[str] = None
+    applicant: Optional[Dict[str, str]] = None
+
 
 
 class BatchStartRequest(BaseModel):
@@ -371,6 +406,34 @@ def preview_email(recipient_id: int):
     }
 
 
+@app.post("/api/preview/custom")
+def preview_custom_email(req: CustomPreviewRequest):
+    """Render preview for an on-the-fly custom email recipient."""
+    email_clean = normalize_email(req.email) if req.email else "recipient@example.com"
+    company_val = req.company or (infer_company_from_email(email_clean) if email_clean else "")
+    dummy_rec = {
+        "email": email_clean,
+        "name": req.name or "",
+        "company": company_val,
+        "role": req.role or "",
+    }
+    app_prof = ApplicantProfile(**(req.applicant or STATE["applicant"]))
+    subj_tmpl = req.subject_template or STATE["subject_template"]
+    body_tmpl = req.body_template or STATE["body_template"]
+    rendered = render_email(
+        subject_template=subj_tmpl,
+        body_template=body_tmpl,
+        recipient=dummy_rec,
+        applicant=app_prof,
+    )
+    return {
+        "recipient": dummy_rec,
+        "rendered": rendered,
+        "has_attachment": STATE["resume_bytes"] is not None,
+        "attachment_name": STATE["resume_name"],
+    }
+
+
 @app.post("/api/auth/login")
 def authorize_gmail():
     """Trigger OAuth 2.0 flow for desktop."""
@@ -424,6 +487,134 @@ def send_test_email(req: TestSendRequest):
         return {"status": "ok", "result": res}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/send/single/{recipient_id}")
+def send_single_recipient_email(recipient_id: int, req: SingleSendRequest):
+    """Dispatch email to a specific individual recipient."""
+    rec = get_recipient_by_id(recipient_id, DEFAULT_DB_PATH)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+
+    app_prof = ApplicantProfile(**(req.applicant or STATE["applicant"]))
+    subj_tmpl = req.subject_template or STATE["subject_template"]
+    body_tmpl = req.body_template or STATE["body_template"]
+
+    rendered = render_email(
+        subject_template=subj_tmpl,
+        body_template=body_tmpl,
+        recipient=rec,
+        applicant=app_prof,
+    )
+
+    try:
+        service = None
+        if not req.dry_run:
+            service = get_gmail_service(CREDENTIALS_FILE, TOKEN_FILE)
+
+        res = send_single_message(
+            service=service,
+            sender_email=app_prof.email,
+            to_email=rec["email"],
+            subject=rendered["subject"],
+            body_text=rendered["body"],
+            attachment_bytes=STATE["resume_bytes"],
+            attachment_filename=STATE["resume_name"] or "Resume.pdf",
+            dry_run=req.dry_run,
+        )
+
+        new_status = STATUS_DRY_RUN if req.dry_run else STATUS_SENT
+        update_recipient_status(rec["id"], new_status, increment_attempt=not req.dry_run, db_path=DEFAULT_DB_PATH)
+        log_send_event(
+            email=rec["email"],
+            status=new_status,
+            recipient_id=rec["id"],
+            subject=rendered["subject"],
+            db_path=DEFAULT_DB_PATH,
+        )
+
+        return {"status": "ok", "result": res, "recipient": rec}
+    except Exception as e:
+        update_recipient_status(rec["id"], STATUS_FAILED, error=str(e), db_path=DEFAULT_DB_PATH)
+        log_send_event(
+            email=rec["email"],
+            status=STATUS_FAILED,
+            recipient_id=rec["id"],
+            subject=rendered["subject"],
+            error_message=str(e),
+            db_path=DEFAULT_DB_PATH,
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/send/custom")
+def send_custom_email(req: CustomSendRequest):
+    """Dispatch email to any custom recipient email address directly."""
+    email_clean = normalize_email(req.email)
+    if not is_valid_email(email_clean):
+        raise HTTPException(status_code=400, detail="Invalid email address format.")
+
+    company_val = req.company or infer_company_from_email(email_clean)
+    rec_id, _ = upsert_recipient(
+        DEFAULT_DB_PATH,
+        email_clean,
+        name=req.name or "",
+        company=company_val,
+        role=req.role or "",
+        notes=req.notes or "Custom outreach",
+    )
+    rec = get_recipient_by_id(rec_id, DEFAULT_DB_PATH)
+
+    app_prof = ApplicantProfile(**(req.applicant or STATE["applicant"]))
+    subj_tmpl = req.subject_template or STATE["subject_template"]
+    body_tmpl = req.body_template or STATE["body_template"]
+
+    rendered = render_email(
+        subject_template=subj_tmpl,
+        body_template=body_tmpl,
+        recipient=rec,
+        applicant=app_prof,
+    )
+
+    try:
+        service = None
+        if not req.dry_run:
+            service = get_gmail_service(CREDENTIALS_FILE, TOKEN_FILE)
+
+        res = send_single_message(
+            service=service,
+            sender_email=app_prof.email,
+            to_email=rec["email"],
+            subject=rendered["subject"],
+            body_text=rendered["body"],
+            attachment_bytes=STATE["resume_bytes"],
+            attachment_filename=STATE["resume_name"] or "Resume.pdf",
+            dry_run=req.dry_run,
+        )
+
+        new_status = STATUS_DRY_RUN if req.dry_run else STATUS_SENT
+        update_recipient_status(rec["id"], new_status, increment_attempt=not req.dry_run, db_path=DEFAULT_DB_PATH)
+        log_send_event(
+            email=rec["email"],
+            status=new_status,
+            recipient_id=rec["id"],
+            subject=rendered["subject"],
+            db_path=DEFAULT_DB_PATH,
+        )
+
+        return {"status": "ok", "result": res, "recipient": rec, "rendered": rendered}
+    except Exception as e:
+        update_recipient_status(rec["id"], STATUS_FAILED, error=str(e), db_path=DEFAULT_DB_PATH)
+        log_send_event(
+            email=rec["email"],
+            status=STATUS_FAILED,
+            recipient_id=rec["id"],
+            subject=rendered["subject"],
+            error_message=str(e),
+            db_path=DEFAULT_DB_PATH,
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 def run_batch_thread(req: BatchStartRequest):
