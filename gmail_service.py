@@ -87,6 +87,7 @@ def send_single_message(
     dry_run: bool = True,
     max_retries: int = 2,
     base_backoff_sec: float = 2.0,
+    sender_name: Optional[str] = "",
 ) -> Dict[str, Any]:
     """
     Send an email safely.
@@ -95,7 +96,7 @@ def send_single_message(
     - Detects ambiguous network timeouts and flags them without blind retries.
     - Respects rate limits and quotas.
     """
-    # 1. Build and encode MIME message
+    # 1. Build and encode MIME message with full RFC 5322 compliance
     mime_msg = create_mime_message(
         sender_email=sender_email,
         to_email=to_email,
@@ -103,6 +104,7 @@ def send_single_message(
         body_text=body_text,
         attachment_bytes=attachment_bytes,
         attachment_filename=attachment_filename,
+        sender_name=sender_name,
     )
     raw_encoded = encode_mime_message(mime_msg)
 

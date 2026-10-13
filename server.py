@@ -483,6 +483,7 @@ def send_test_email(req: TestSendRequest):
             attachment_bytes=STATE["resume_bytes"],
             attachment_filename=STATE["resume_name"] or "Resume.pdf",
             dry_run=req.dry_run,
+            sender_name=app_prof.name,
         )
         return {"status": "ok", "result": res}
     except Exception as e:
@@ -521,6 +522,7 @@ def send_single_recipient_email(recipient_id: int, req: SingleSendRequest):
             attachment_bytes=STATE["resume_bytes"],
             attachment_filename=STATE["resume_name"] or "Resume.pdf",
             dry_run=req.dry_run,
+            sender_name=app_prof.name,
         )
 
         new_status = STATUS_DRY_RUN if req.dry_run else STATUS_SENT
@@ -590,6 +592,7 @@ def send_custom_email(req: CustomSendRequest):
             attachment_bytes=STATE["resume_bytes"],
             attachment_filename=STATE["resume_name"] or "Resume.pdf",
             dry_run=req.dry_run,
+            sender_name=app_prof.name,
         )
 
         new_status = STATUS_DRY_RUN if req.dry_run else STATUS_SENT
@@ -670,6 +673,7 @@ def run_batch_thread(req: BatchStartRequest):
                 attachment_bytes=STATE["resume_bytes"],
                 attachment_filename=STATE["resume_name"] or "Resume.pdf",
                 dry_run=req.dry_run,
+                sender_name=app_prof.name,
             )
 
             if req.dry_run:

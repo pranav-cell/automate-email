@@ -5,6 +5,7 @@ import os
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr, formatdate, make_msgid
 from typing import Optional, Tuple
 
 MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB limit for safety
@@ -50,12 +51,24 @@ def create_mime_message(
     body_text: str,
     attachment_bytes: Optional[bytes] = None,
     attachment_filename: Optional[str] = "Resume.pdf",
+    sender_name: Optional[str] = "",
 ) -> MIMEMultipart:
-    """Create a standardized MIME email message with optional PDF attachment."""
-    message = MIMEMultipart()
-    message["to"] = to_email
-    message["from"] = sender_email
-    message["subject"] = subject
+    """Create a standardized RFC 5322 MIME email message with optional PDF attachment."""
+    message = MIMEMultipart("mixed")
+    message["To"] = to_email
+    if sender_name:
+        message["From"] = formataddr((sender_name, sender_email))
+        message["Reply-To"] = formataddr((sender_name, sender_email))
+    else:
+        message["From"] = sender_email
+        message["Reply-To"] = sender_email
+
+    message["Subject"] = subject
+    message["Date"] = formatdate(localtime=True)
+
+    # Generate standard RFC Message-ID header
+    domain = sender_email.split("@")[1] if "@" in sender_email else "gmail.com"
+    message["Message-ID"] = make_msgid(domain=domain)
 
     # Plaintext message body
     text_part = MIMEText(body_text, "plain", "utf-8")
@@ -82,3 +95,4 @@ def encode_mime_message(message: MIMEMultipart) -> str:
     """Encode a MIMEMultipart object into a URL-safe base64 string for Gmail API."""
     raw_bytes = message.as_bytes()
     return base64.urlsafe_b64encode(raw_bytes).decode("utf-8")
+
